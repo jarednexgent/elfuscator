@@ -6,6 +6,6 @@
 
 #define SECTION_ALIGN 16
 
-bool spoof_section_headers(char** p_data, size_t* p_data_len); 
+bool spoof_sections_table(char** p_data, size_t* p_data_len); 
                               
 #endif // SPOOF_H

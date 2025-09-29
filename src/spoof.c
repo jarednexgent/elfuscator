@@ -10,21 +10,22 @@
 
 static inline void refresh_views(char **p_data, Elf64_Ehdr **ehdr, Elf64_Phdr **phdr_base) 
 {
-    *ehdr = (Elf64_Ehdr*)(*p_data);
-    *phdr_base = (Elf64_Phdr*)(*p_data + (*ehdr)->e_phoff);     
+    *ehdr = (Elf64_Ehdr*)(*p_data); // get pointer elf header, given all of the changes made to file data
+    *phdr_base = (Elf64_Phdr*)(*p_data + (*ehdr)->e_phoff);  //  get pointer to program header base
 }
+
 
 static bool append_null_section(char **p_data, size_t *p_len) 
 {
-    Elf64_Shdr sh = { 0 };
-    char *buf = NULL;
+    Elf64_Shdr sh = { 0 }; // prepare a zeroed section header struct
+    char *buf = NULL; 
 
-    if (!(buf = realloc(*p_data, *p_len + sizeof sh)))
+    if (!(buf = realloc(*p_data, *p_len + sizeof sh))) // resizes the existing blob to make room for one more section header at the end
         return false;
 
-    *p_data = buf;
-    memcpy(*p_data + *p_len, &sh, sizeof sh);
-    *p_len += sizeof sh;
+    *p_data = buf; // propagate the (possibly moved) pointer back to the caller
+    memcpy(*p_data + *p_len, &sh, sizeof sh); // write the new zeroed header at the end of the buffer
+    *p_len += sizeof sh; // update the caller’s recorded buffer size.
     
     return true;
 }
@@ -33,12 +34,12 @@ static bool append_named_section(char **p_data, size_t *p_len, const Elf64_Shdr 
 {
     char *buf = NULL;
 
-    if (!(buf = realloc(*p_data, *p_len + sizeof *hdr)))
+    if (!(buf = realloc(*p_data, *p_len + sizeof *hdr))) 
         return false;
 
-    *p_data = buf;
-    memcpy(*p_data + *p_len, hdr, sizeof *hdr);
-    *p_len += sizeof *hdr;
+    *p_data = buf; // caller pointer set to resized blob
+    memcpy(*p_data + *p_len, hdr, sizeof *hdr); // write the new section header at the end of the buffer
+    *p_len += sizeof *hdr; // update buffer size
 
     return true;
 }
@@ -47,21 +48,23 @@ static bool build_section_headers(char *shstrtab, size_t shstr_cap, size_t *shst
                                   size_t *off_data, size_t *off_fini, size_t *off_text, size_t *off_shstr) 
  {
 
-    const char *names[] = {".init", ".data", ".fini", ".text", ".shstrtab"};
-    size_t *offs[] = {off_init, off_data, off_fini, off_text, off_shstr};
+    const char *names[] = {".init", ".data", ".fini", ".text", ".shstrtab"}; // make array of section names
+    const int names_count = (int)(sizeof(names) / sizeof(names[0]));
+    size_t *offs[] = {off_init, off_data, off_fini, off_text, off_shstr}; // make array of section header offsets
 
-    *shstr_len = 1; // NUL 
 
-    for (size_t i = 0; i < 5; ++i) {
+    *shstr_len = 1; // .shstrtab must start with a leading NUL byte
 
-        size_t name_bytes = strlen(names[i]) + 1;
+    for (size_t i = 0; i < (size_t)names_count; ++i) {
 
-        if (*shstr_len + name_bytes > shstr_cap)
-            return false; // avoid overflow 
+        size_t name_bytes = strlen(names[i]) + 1; // include NUL terminator
+    
+        if (*shstr_len + name_bytes > shstr_cap) // avoid overflow 
+            return false; 
 
-        *offs[i] = *shstr_len;
-        memcpy(shstrtab + *shstr_len, names[i], name_bytes);
-        *shstr_len += name_bytes;
+        *offs[i] = *shstr_len; // sh_name offset
+        memcpy(shstrtab + *shstr_len, names[i], name_bytes); // copy name+NUL
+        *shstr_len += name_bytes;  // advance
     }
     
     return true;
@@ -84,7 +87,8 @@ static bool add_data_section(char **p_data, size_t *p_len, Elf64_Ehdr *ehdr, Elf
          }        
     }
 
-    if (!rx) return false;
+    if (rx == NULL) 
+        return false;
     
     const Elf64_Addr seg_va   = rx->p_vaddr;
     const Elf64_Off  seg_off  = rx->p_offset;
@@ -177,7 +181,7 @@ static bool add_text_section(char **p_data, size_t *p_len,
         any = any ? any : p;
 
         if (p->p_flags & PF_X) { 
-            if (!rx) 
+            if (rx == NULL) 
                 rx = p; 
             else 
                 rw = p; 
@@ -187,7 +191,7 @@ static bool add_text_section(char **p_data, size_t *p_len,
     /* --- prefer RW, else RX/RWX, else any LOAD --- */
     src = rw ? rw : (rx ? rx : any);
 
-    if (!src) return false;
+    if (src == NULL) return false;
 
     Elf64_Shdr text_hdr = {
     .sh_name      = (Elf64_Word)text_name_offset,
@@ -224,11 +228,11 @@ static bool add_shstrtab_section(char **p_data, size_t *p_len,
     };
 
     char *buf = NULL;
+
     if (!(buf = realloc(*p_data, *p_len + sizeof sh + shstr_len))) 
         return false;
 
     *p_data = buf;
-
     memcpy(*p_data + *p_len, &sh, sizeof sh);
     *shstr_index = *sec_count;
     *p_len += sizeof sh;
@@ -241,7 +245,7 @@ static bool add_shstrtab_section(char **p_data, size_t *p_len,
     return true;
 }
 
-bool spoof_section_headers(char **p_data, size_t *p_data_len)
+bool spoof_sections_table(char **p_data, size_t *p_data_len)
 {
     if (!p_data || !*p_data || !p_data_len)
         return false;

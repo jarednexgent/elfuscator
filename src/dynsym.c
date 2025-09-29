@@ -81,7 +81,7 @@ bool shuffle_dynsym_names(char **p_data, size_t *p_size)
         }
     }
 
-    if (!dynsym_sh) { 
+    if (dynsym_sh == NULL) { 
         fprintf(stderr, "[!] dynsym section does not exist\n"); 
         goto exit; 
     }
@@ -159,13 +159,12 @@ bool shuffle_dynsym_names(char **p_data, size_t *p_size)
         goto exit;
     }
 
-    srand((unsigned)time(NULL));
+    srand((unsigned)time(NULL)); // seed rng
     build_rotation_perm(eligible_count, permutation);
 
     for (size_t i = 0; i < eligible_count; ++i) {
         eligible_syms[i]->st_name = name_offsets[permutation[i]];
     }
-
 
     printf("[+] dynamic symbol names shuffled (changed=%zu) [%s]\n",
            eligible_count, SHUFFLE_IMPORTS ? "imports+exports" : "exports-only");

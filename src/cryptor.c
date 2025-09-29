@@ -36,7 +36,7 @@ static inline uint64_t u64_max(uint64_t a, uint64_t b)
      return a > b ? a : b; 
 }
 
-/* --- if the SHT sits at/after `insert_off`, shift the tail (e_shoff..size) by `delta` and fix sh_offset. --- */
+/* --- if the SHT overlaps `insert_off`, shift the tail (e_shoff..size) by `delta` and fix sh_offset. --- */
 static bool relocate_sht(uint8_t **p_data, size_t *p_size, Elf64_Ehdr **p_ehdr,
                                    size_t insert_off, size_t delta)
 {
@@ -48,7 +48,7 @@ static bool relocate_sht(uint8_t **p_data, size_t *p_size, Elf64_Ehdr **p_ehdr,
         return true;
 
     if ((size_t)ehdr->e_shoff < insert_off)
-        return true; // SHT is before insert; safe
+        return true; // SHT is before stub insertion point
 
     size_t old_shoff = (size_t)ehdr->e_shoff;
     size_t tail_len  = size - old_shoff;
@@ -146,7 +146,7 @@ bool encrypt_code_segment(uint8_t **p_data, size_t *p_size)
         }
     }
 
-    if (!text_segment) { 
+    if (text_segment == NULL) { 
         fprintf(stderr, "[!] could not find PF_X segment\n"); 
         goto exit; 
     }
@@ -161,7 +161,7 @@ bool encrypt_code_segment(uint8_t **p_data, size_t *p_size)
         goto exit;
     }
 
-    /* --- computer link-time VAs --- */
+    /* --- link-time VAs --- */
     actual_entry_va = ehdr->e_entry;
     stub_va         = text_segment->p_vaddr + text_segment->p_filesz; // VA of stub start
     virt_start_va   = text_segment->p_vaddr + (encrypt_start_off - text_segment->p_offset);
@@ -209,14 +209,21 @@ bool encrypt_code_segment(uint8_t **p_data, size_t *p_size)
         if (!relocate_sht(&data, &size, &ehdr, (size_t)stub_file_off, sizeof(stub))) 
             goto exit;
 
-        if (size_needed > size) {
+        if (size_needed > size) 
+        {
             if (!(grown = (uint8_t *)realloc(data, (size_t)size_needed))) { 
                 fprintf(stderr, "[!] realloc failed: %s\n", strerror(errno)); 
                 goto exit; 
             } 
 
             memset(grown + size, 0x00, (size_t)(size_needed - size));
-            data = grown; size = (size_t)size_needed; *p_data = data; *p_size = size;
+
+            data = grown; 
+            size = (size_t)size_needed; 
+
+            *p_data = data; 
+            *p_size = size;
+
             /* --- refresh views --- */
             ehdr = (Elf64_Ehdr *)data;
             phdr_base = (Elf64_Phdr *)(data + ehdr->e_phoff);
@@ -225,7 +232,7 @@ bool encrypt_code_segment(uint8_t **p_data, size_t *p_size)
 
         /* --- patch immediates --- */
         srand((unsigned)time(NULL));
-        key = (unsigned char)(rand() & 0xFF);
+        key = (unsigned char)(rand() & 0xFF); // XOR key is randomly generated
         anchor_va = stub_va + LEG_ANCHOR_DELTA;
 
         stub[LEG_OFF_KEY_IMM8] = key;
@@ -322,14 +329,21 @@ bool encrypt_code_segment(uint8_t **p_data, size_t *p_size)
         if (!relocate_sht(&data, &size, &ehdr, (size_t)stub_file_off, sizeof(stub))) 
             goto exit;
 
-        if (size_needed > size) {
+        if (size_needed > size) 
+        {
             if (!(grown = (uint8_t *)realloc(data, (size_t)size_needed))) { 
                 fprintf(stderr, "[!] realloc failed: %s\n", strerror(errno)); 
                 goto exit; 
             }
             
             memset(grown + size, 0x00, (size_t)(size_needed - size));
-            data = grown; size = (size_t)size_needed; *p_data = data; *p_size = size;
+
+            data = grown; 
+            size = (size_t)size_needed; 
+            
+            *p_data = data; 
+            *p_size = size;
+
             /* --- refresh views --- */
             ehdr = (Elf64_Ehdr *)data;
             phdr_base = (Elf64_Phdr *)(data + ehdr->e_phoff);

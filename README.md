@@ -1,8 +1,8 @@
 # elfuscator
 
-[![elfuscator-logo.png](https://i.postimg.cc/5trh9NYc/elfuscator-logo.png)](https://postimg.cc/XZwHQWkx)
+[![elfuscator-logo.png](https://i.postimg.cc/vTsdnvDs/elfuscator-logo.png)](https://postimg.cc/N9pVqm1J)
 
-Elfuscator is an anti-analysis tool for ELF files.
+Elfuscator is an anti-reversing and obfuscation toolkit for x86_64 ELF binaries on Linux.
 
 ## Build
 
@@ -14,16 +14,18 @@ cmake --build .
 
 ## Usage
 
-Run elfuscator with one option at a time. You can run it multiple times on the same binary to apply different transformations in sequence.
+Run `elfuscator` with one option at a time. You can run it multiple times on the same binary to apply different transformations in sequence.
 
 ```shell
 ./elfuscator -h
 
 Usage:
-  ./elfuscator -s <path-to-elf>   Remove section header table
-  ./elfuscator -p <path-to-elf>   Insert spoofed section headers
+  ./elfuscator -s <path-to-elf>   Strip section header table
+  ./elfuscator -p <path-to-elf>   Spoof section header table
   ./elfuscator -y <path-to-elf>   Shuffle dynamic symbol names
   ./elfuscator -e <path-to-elf>   Switch endianness (ELFDATA2LSB <-> ELFDATA2MSB)
-  ./elfuscator -c <path-to-elf>   Add code segment cryptor stub
+  ./elfuscator -r <path-to-elf>   Randomize padding bytes
+  ./elfuscator -d <path-to-elf>   Disable core dumps
+  ./elfuscator -c <path-to-elf>   Encrypt code segment
   ./elfuscator -h | --help        Show this help message
 ```

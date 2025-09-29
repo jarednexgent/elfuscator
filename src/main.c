@@ -5,12 +5,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <time.h>
 #include <elf.h>
 #include "fileio.h"
 #include "strip.h"
 #include "spoof.h"
 #include "dynsym.h"
 #include "cryptor.h"
+#include "dumps.h"
 
 /* --- check if input is valid elf file --- */
 static bool check_elf(const char *data) 
@@ -48,14 +50,35 @@ static bool switch_endianness(char *data, size_t data_len)
     return true;
 }
 
+/* --- bytes 9-15 are padding and safe to mutate --- */
+static bool randomize_ident_padding(char *data, size_t len) 
+{
+    if (!data || len < EI_NIDENT) 
+        return false;
+
+    unsigned char *ident_padding = (unsigned char *)data;
+    
+    srand((unsigned)time(NULL)); 
+
+    for (int x = EI_PAD; x < EI_NIDENT; ++x) {
+        ident_padding[x] = (unsigned char)(rand() & 0xFF);
+    }
+
+    printf("[+] e_ident padding bytes randomized\n");
+    return true;
+}
+
+
 static void print_help(const char *program_name)
 {
     printf("Usage:\n");
-    printf("  %s -s <path-to-elf>   Remove section header table\n", program_name);
-    printf("  %s -p <path-to-elf>   Insert spoofed section headers\n", program_name);
+    printf("  %s -s <path-to-elf>   Strip section header table\n", program_name);
+    printf("  %s -p <path-to-elf>   Spoof section header table\n", program_name);
     printf("  %s -y <path-to-elf>   Shuffle dynamic symbol names\n", program_name);
     printf("  %s -e <path-to-elf>   Switch endianness (ELFDATA2LSB <-> ELFDATA2MSB)\n", program_name);
-    printf("  %s -c <path-to-elf>   Add code segment cryptor stub\n", program_name);
+    printf("  %s -r <path-to-elf>   Randomize padding bytes\n", program_name);
+    printf("  %s -d <path-to-elf>   Disable core dumps\n", program_name);
+    printf("  %s -c <path-to-elf>   Encrypt code segment\n", program_name);
     printf("  %s -h | --help        Show this help message\n", program_name);
 
 }
@@ -88,8 +111,8 @@ int main(int argc, char **argv) {
             goto exit;
         }
     } else if (strcmp(option, "-p") == 0) {
-        if (!spoof_section_headers(&file_data, &file_size)) {
-            fprintf(stderr, "[-] failed to insert spoofed section headers\n");
+        if (!spoof_sections_table(&file_data, &file_size)) {
+            fprintf(stderr, "[-] failed to insert spoofed sections table\n");
             goto exit;
         }
     } else if (strcmp(option, "-y") == 0) {
@@ -102,9 +125,19 @@ int main(int argc, char **argv) {
             fprintf(stderr, "[-] failed to switch endianness\n");
             goto exit;
         }
+    } else if (strcmp(option, "-r") == 0) {
+        if (!randomize_ident_padding(file_data, file_size)) {
+            fprintf(stderr, "[-] failed to randomize e_ident padding bytes\n");
+            goto exit;
+        }
     } else if (strcmp(option, "-c") == 0) {
         if (!encrypt_code_segment((uint8_t **)&file_data, &file_size)) {
             fprintf(stderr, "[-] failed to encrypt code segment\n");
+            goto exit;
+        }
+    } else if (strcmp(option, "-d") == 0) {
+        if (!disable_dumps((uint8_t **)&file_data, &file_size)) {
+            fprintf(stderr, "[-] failed to disable dumpable attribute\n");
             goto exit;
         }
     } else if (strcmp(option, "-h") == 0 || strcmp(option, "--help") == 0) {
