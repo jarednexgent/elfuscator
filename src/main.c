@@ -13,16 +13,15 @@
 #include "dynsym.h"
 #include "cryptor.h"
 #include "dumps.h"
+#include "tracers.h"
 
-/* --- check if input is valid elf file --- */
+// ===== check if input is valid elf file =====
 static bool check_elf(const char *data) 
 {
     const unsigned char *ident = (const unsigned char *)data;
 
-    if (ident[EI_MAG0] != ELFMAG0 ||
-        ident[EI_MAG1] != ELFMAG1 ||
-        ident[EI_MAG2] != ELFMAG2 ||
-        ident[EI_MAG3] != ELFMAG3) {
+    if (ident[EI_MAG0] != ELFMAG0 || ident[EI_MAG1] != ELFMAG1 ||
+        ident[EI_MAG2] != ELFMAG2 || ident[EI_MAG3] != ELFMAG3) {
         return false;
     }
     
@@ -50,40 +49,21 @@ static bool switch_endianness(char *data, size_t data_len)
     return true;
 }
 
-/* --- bytes 9-15 are padding and safe to mutate --- */
-static bool randomize_ident_padding(char *data, size_t len) 
-{
-    if (!data || len < EI_NIDENT) 
-        return false;
-
-    unsigned char *ident_padding = (unsigned char *)data;
-    
-    srand((unsigned)time(NULL)); 
-
-    for (int x = EI_PAD; x < EI_NIDENT; ++x) {
-        ident_padding[x] = (unsigned char)(rand() & 0xFF);
-    }
-
-    printf("[+] e_ident padding bytes randomized\n");
-    return true;
-}
-
-
 static void print_help(const char *program_name)
 {
     printf("Usage:\n");
-    printf("  %s -s <path-to-elf>   Strip section header table\n", program_name);
-    printf("  %s -p <path-to-elf>   Spoof section header table\n", program_name);
-    printf("  %s -y <path-to-elf>   Shuffle dynamic symbol names\n", program_name);
-    printf("  %s -e <path-to-elf>   Switch endianness (ELFDATA2LSB <-> ELFDATA2MSB)\n", program_name);
-    printf("  %s -r <path-to-elf>   Randomize padding bytes\n", program_name);
+    printf("  %s -s <path-to-elf>   Strip section headers\n", program_name);
+    printf("  %s -p <path-to-elf>   Spoof section headers\n", program_name);
+    printf("  %s -y <path-to-elf>   Shuffle dynamic symbols\n", program_name);
+    printf("  %s -e <path-to-elf>   Switch endianness\n", program_name);
+    printf("  %s -t <path-to-elf>   Disable tracers\n", program_name);
     printf("  %s -d <path-to-elf>   Disable core dumps\n", program_name);
     printf("  %s -c <path-to-elf>   Encrypt code segment\n", program_name);
     printf("  %s -h | --help        Show this help message\n", program_name);
-
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv) 
+{
     if (argc != 3) {
         print_help(argv[0]);
         return EXIT_FAILURE;
@@ -107,17 +87,17 @@ int main(int argc, char **argv) {
 
     if (strcmp(option, "-s") == 0) {
         if (!strip_sections_table(file_data)) {
-            fprintf(stderr, "[-] failed to remove section header table\n");
+            fprintf(stderr, "[-] failed to remove section headers\n");
             goto exit;
         }
     } else if (strcmp(option, "-p") == 0) {
         if (!spoof_sections_table(&file_data, &file_size)) {
-            fprintf(stderr, "[-] failed to insert spoofed sections table\n");
+            fprintf(stderr, "[-] failed to spoof section headers\n");
             goto exit;
         }
     } else if (strcmp(option, "-y") == 0) {
         if (!shuffle_dynsym_names(&file_data, &file_size)) {
-            fprintf(stderr, "[-] failed to shuffle dynamic symbol names\n");
+            fprintf(stderr, "[-] failed to shuffle dynamic symbols\n");
             goto exit;
         }
     } else if (strcmp(option, "-e") == 0) {
@@ -125,19 +105,19 @@ int main(int argc, char **argv) {
             fprintf(stderr, "[-] failed to switch endianness\n");
             goto exit;
         }
-    } else if (strcmp(option, "-r") == 0) {
-        if (!randomize_ident_padding(file_data, file_size)) {
-            fprintf(stderr, "[-] failed to randomize e_ident padding bytes\n");
+    } else if (strcmp(option, "-t") == 0) {
+        if (!disable_tracers((uint8_t **)&file_data, &file_size)) {
+            fprintf(stderr, "[-] failed to disable tracers\n");
+            goto exit;
+        }
+    } else if (strcmp(option, "-d") == 0) {
+        if (!disable_dumps((uint8_t **)&file_data, &file_size)) {
+            fprintf(stderr, "[-] failed to disable core dumps\n");
             goto exit;
         }
     } else if (strcmp(option, "-c") == 0) {
         if (!encrypt_code_segment((uint8_t **)&file_data, &file_size)) {
             fprintf(stderr, "[-] failed to encrypt code segment\n");
-            goto exit;
-        }
-    } else if (strcmp(option, "-d") == 0) {
-        if (!disable_dumps((uint8_t **)&file_data, &file_size)) {
-            fprintf(stderr, "[-] failed to disable dumpable attribute\n");
             goto exit;
         }
     } else if (strcmp(option, "-h") == 0 || strcmp(option, "--help") == 0) {

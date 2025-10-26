@@ -1,3 +1,4 @@
+
 #include <elf.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -5,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "dumps.h"
+#include "tracers.h"
 
 static inline uint64_t u64_max(uint64_t a, uint64_t b) 
 { 
@@ -13,14 +14,13 @@ static inline uint64_t u64_max(uint64_t a, uint64_t b)
 }
 
 // ===== offsets inside the stub for immediate patching; keep in sync with stub bytes below =====
-
-enum {
-    DD_OFF_DELTA = 8,          // push rbx (1 byte) + lea rbx, [rip+disp32] (7 bytes) = 8 bytes from stub start to the next instruction
-    DD_OFF_ANCHOR_IMM64 = 10,  // mov rax, anchor (imm64 starts here)
-    DD_OFF_ACTENTRY_IMM64 = 50 // mov rax, actual_entry (imm64 starts here)
+enum { 
+    DD_OFF_DELTA = 11,
+    DD_OFF_ANCHOR_IMM64 = 13,  
+    DD_OFF_ACTENTRY_IMM64 = 53 
 };
 
-bool disable_dumps(uint8_t **p_data, size_t *p_size) 
+bool disable_tracers(uint8_t **p_data, size_t *p_size) 
 {
     uint8_t *data = NULL;
     size_t size = 0;
@@ -29,16 +29,16 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
     Elf64_Ehdr *ehdr = NULL;
     Elf64_Phdr *phdr_base = NULL;
     Elf64_Phdr *text = NULL;
-    int text_idx = -1;
+    int text_seg_idx = -1;
 
     uint64_t ph_bytes = 0;
-    uint64_t enc_start_off = 0; // used for range validation 
+    uint64_t enc_start_off = 0; 
     uint64_t text_file_end = 0;
     uint64_t stub_file_off = 0;
 
     uint64_t actual_entry = 0;
     uint64_t stub_va = 0;
-    uint64_t anchor_va = 0; // VA of next instruction after LEA+disp32
+    uint64_t anchor_va = 0; 
 
     uint8_t *resized_data = NULL;
     uint64_t size_needed = 0;
@@ -70,7 +70,7 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
 
         if (p->p_type == PT_LOAD && (p->p_flags & PF_X)) { 
             text = p; 
-            text_idx = idx; 
+            text_seg_idx = idx; 
             break; 
         }
     }
@@ -93,30 +93,40 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
     stub_va       = text->p_vaddr + text->p_filesz;
     actual_entry  = ehdr->e_entry;
 
-      // ===== minimal anti-dump PIC stub =====
-    unsigned char stub[] = {
-        0x53,                        //  0: push rbx
-        0x48,0x8D,0x1D,              //  1: lea rbx, [rip+0]             
-        0x00,0x00,0x00,0x00,         //  4: disp32=0                
-        0x48,0xB8,                   //  8: mov rax, imm64               
-        0,0,0,0,0,0,0,0,             // 10: imm64 (anchor_va)
-        0x48,0x29,0xC3,              // 18: sub rbx, rax                
-        0x48,0x31,0xC0,              // 21: xor rax, rax                
-        0x48,0xC7,0xC0,0x9D,0x00,0x00,0x00, // 24: mov rax, 157 (SYS_prctl)
-        0xBF,0x04,0x00,0x00,0x00,    // 31: mov edi, 4   (PR_SET_DUMPABLE)
-        0x31,0xF6,                   // 36: xor esi, esi
-        0x31,0xD2,                   // 38: xor edx, edx
-        0x41,0x31,0xD2,              // 40: xor r10d, r10d
-        0x41,0x31,0xC0,              // 43: xor r8d,  r8d
-        0x0F,0x05,                   // 46: syscall
-        0x48,0xB8,                   // 48: mov rax, imm64 
-        0,0,0,0,0,0,0,0,             // 50: imm64 (actual_entry)
-        0x48,0x01,0xD8,              // 58: add rax, rbx
-        0x5B,                         // 61: pop rbx
-        0xFF,0xE0                    // 62: jmp rax
-    };
+      // ===== anti-debugging stub =====
+      unsigned char stub[] = {
+        /*00*/ 0x57,                               // push rdi
+        /*01*/ 0x56,                               // push rsi                    
+        /*02*/ 0x52,                               // push rdx                   
+        /*03*/ 0x53,                               // push rbx                   
+        /*04*/ 0x48, 0x8D, 0x1D,                   // [lea rip+0]
+        /*07*/ 0x00, 0x00, 0x00, 0x00,             // disp32 = 0
+        /*11*/ 0x48, 0xB8,                         // mov rax, imm64
+        /*13*/ 0,0,0,0,0,0,0,0,                    // imm64 (anchor_va)         
+        /*21*/ 0x48, 0x29, 0xC3,                   // sub rbx, rax   ; compute the slide
+        /*24*/ 0x48, 0x31, 0xC0,                   // xor rax, rax 
+        /*27*/ 0x31, 0xFF,                     	   // xor edi,edi
+        /*29*/ 0x31, 0xF6,                	       // xor esi,esi
+        /*31*/ 0x31, 0xD2,                	       // xor edx,edx
+        /*33*/ 0x45, 0x31, 0xD2,             	   // xor r10d,r10d
+        /*36*/ 0xB0, 0x65,                	       // mov al,0x65    ; ptrace (101)
+        /*38*/ 0x0F, 0x05,                	       // syscall
+        /*40*/ 0x74, 0x09,                	       // je +0x0B       ; if rax==0 skip exit 
+        /*42*/ 0x40, 0xb7, 0x01,             	   // mov dil,0x1    ; EXIT_FAILURE
+        /*45*/ 0x31, 0xC0,                	       // xor eax,eax
+        /*47*/ 0xB0, 0x3C,                         // mov al,0x3c    ; exit (60)
+        /*49*/ 0x0F, 0x05,                         // syscall
+        /*51*/ 0x48,0xB8,                          // mov rax, imm64 
+        /*53*/ 0,0,0,0,0,0,0,0,                    // imm64 (actual_entry)
+        /*61*/ 0x48,0x01,0xD8,                     // add rax, rbx   ; rax==OEP+slide
+        /*64*/ 0x5B,                               // pop rbx
+        /*65*/ 0x5A,                               // pop rdx 
+        /*66*/ 0x5E,                               // pop rsi 
+        /*67*/ 0x5F,                               // pop rdi
+        /*68*/ 0xFF, 0xE0                          // jmp rax  
+       };
+       
 
-  
     // ===== patch immediates =====
     anchor_va = stub_va + DD_OFF_DELTA;
     memcpy(stub + DD_OFF_ANCHOR_IMM64, &anchor_va, sizeof(uint64_t));
@@ -124,9 +134,10 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
 
     // ===== calculate size_needed, reallocate pointer, zero the memory (before writing) =====
     size_needed = stub_file_off + sizeof(stub);
+
     if (size_needed > size) 
     {     
-        if (!(resized_data = (uint8_t *)realloc(data, (size_t)size_needed))) 
+        if ( ! (resized_data = (uint8_t *)realloc(data, (size_t)size_needed)) ) 
         { 
             fprintf(stderr, "[!] realloc failed: %s\n", strerror(errno)); 
             return false; 
@@ -143,7 +154,7 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
         // refresh views
         ehdr = (Elf64_Ehdr *)data;
         phdr_base = (Elf64_Phdr *)(data + ehdr->e_phoff);
-        text = (Elf64_Phdr *)((uint8_t *)phdr_base + (size_t)text_idx * ehdr->e_phentsize);
+        text = (Elf64_Phdr *)((uint8_t *)phdr_base + (size_t)text_seg_idx * ehdr->e_phentsize);
     }
 
     // ===== write the stub =====
@@ -156,9 +167,9 @@ bool disable_dumps(uint8_t **p_data, size_t *p_size)
     // Switch entry to stub
     ehdr->e_entry = stub_va;
 
-    printf("[+] anti-dump stub inserted (PR_SET_DUMPABLE=0)\n");
+    printf("[+] anti-trace stub inserted (PTRACE_TRACEME)\n");
     result = true;
+    
 exit:
     return result;
 }
-

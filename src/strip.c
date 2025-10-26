@@ -23,15 +23,15 @@ static Elf64_Shdr *extract_section_table(char* data, int* p_sec_count, int* p_st
 
 static bool wipe_section_headers(char* data, Elf64_Shdr* sections, int sec_count, int str_index)
 {
-    for (int i = 0; i < sec_count; i++) { // loops through each section
+    for (int idx = 0; idx < sec_count; idx++) { // loops through each section
 
-        if (sections[i].sh_link == (Elf64_Word)str_index) { // if section is linked to string table then we OUTTIE
-            fprintf(stderr, "[!] section %d is still linked to string index\n", i); 
+        if (sections[idx].sh_link == (Elf64_Word)str_index) { // if section is linked to string table then we OUTTIE
+            fprintf(stderr, "[!] section %d is still linked to string index\n", idx); 
             return false;
         }
 
-        if (i == str_index) { // wipe the content of the shdr string table
-            memset(data + sections[i].sh_offset, 0, sections[i].sh_size);
+        if (idx == str_index) { // wipe the content of the shdr string table
+            memset(data + sections[idx].sh_offset, 0, sections[idx].sh_size);
         }
     }
 
@@ -46,7 +46,7 @@ bool strip_sections_table(char* data)
     Elf64_Shdr* sections = NULL;
     bool result = false;
     
-    /* --- file data in, section_count & str_index out, return pointer to section table --- */
+    // ===== file data in, section_count & str_index out, return pointer to section table =====
     if (!(sections = extract_section_table(data, &section_count, &str_index))) {
         fprintf(stderr, "[!] section header table not found\n");
         goto exit;
